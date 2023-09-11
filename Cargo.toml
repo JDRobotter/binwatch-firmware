@@ -1,0 +1,21 @@
+[package]
+name = "binwatch"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto=true
+codegen-units=1
+debug=true
+opt-level='s'
+panic = "abort"
+
+[features]
+default = []
+
+[dependencies]
+cortex-m = { version="0.7.6" }
+cortex-m-rt = "0.7.2"
+embedded-hal = "0.2.7"
+irq = "0.2.3"
+stm32f0xx-hal = { version="0.18.0", features=["rt","stm32f030x6"] }
