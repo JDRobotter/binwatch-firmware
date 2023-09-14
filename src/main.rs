@@ -7,26 +7,14 @@ use display::WatchDisplay;
 mod rtc;
 use rtc::RealTimeClock;
 
-use cortex_m::interrupt::Mutex;
-
 // Setup startup code and minimal runtime for uC
 // (check https://docs.rs/cortex-m-rt/latest/cortex_m_rt/)
 use cortex_m_rt::entry;
 
 use stm32f0xx_hal::{
-    pac::{self, interrupt},
+    pac::{self, interrupt, PWR},
     prelude::*,
 };
-
-use irq::{handler, scope, scoped_interrupts};
-
-scoped_interrupts! {
-    enum Interrupt {
-        TIM3,
-    }
-
-    use #[interrupt];
-}
 
 use core::panic::PanicInfo;
 #[panic_handler]
@@ -54,42 +42,33 @@ fn main() -> ! {
 
     //let gpiob = p.GPIOB.split(&mut rcc);
     let gpioc = p.GPIOC.split(&mut rcc);
-
+    let button = cortex_m::interrupt::free(|cs| gpioc.pc13.into_floating_input(cs));
     // setup RTC
     cortex_m::asm::delay(100_000);
-    let rtc = RealTimeClock::new(p.PWR, p.RTC);
+    let mut rtc = RealTimeClock::new(p.PWR, p.RTC, cp.SCB);
     // setup display
     let mut display = WatchDisplay::new(p.GPIOA, p.GPIOB);
 
-    //// XXX
-    display.set_time(0xff, 0xff);
-    cortex_m::asm::delay(100000);
-    display.set_time(0, 0);
-    // XXX
+    let mut k = 0u32;
+    loop {
+        // check button state
+        /*
+        if button.is_high().unwrap() {
+            // wait button to go low
+            while button.is_high().unwrap() {}
+            rtc.sleep();
+        }*/
 
-    handler!(tim3_handler = || {});
-
-    scope(|scope| {
-        scope.register(Interrupt::TIM3, tim3_handler);
-
-        let mut _nvic = cp.NVIC;
-        unsafe {
-            cortex_m::peripheral::NVIC::unmask(pac::Interrupt::TIM3);
+        if k % 10000 == 0 {
+            let (hours, mins) = rtc.get();
+            display.set_time(hours, mins);
         }
 
-        let mut k = 0u32;
-        loop {
-            k += 1;
-
-            if k % 10000 == 0 {
-                let (mins, secs) = rtc.get();
-                display.set_time(mins, secs);
-            }
-
-            display.update();
+        if k > 500_000 {
+            rtc.sleep();
         }
-    });
 
-    // not reachable
-    panic!();
+        display.update();
+        k += 1;
+    }
 }

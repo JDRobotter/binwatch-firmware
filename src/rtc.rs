@@ -3,16 +3,37 @@ use stm32f0xx_hal::{
     rcc::Rcc,
 };
 
+use cortex_m::peripheral::SCB;
+
 pub struct RealTimeClock {
     rtc: RTC,
     pwr: PWR,
+    scb: SCB,
 }
 
 impl RealTimeClock {
-    pub fn new(pwr: PWR, rtc: RTC) -> Self {
-        let mut _self = Self { pwr, rtc };
+    pub fn new(pwr: PWR, rtc: RTC, scb: SCB) -> Self {
+        let mut _self = Self { pwr, rtc, scb };
         _self.configure();
         _self
+    }
+
+    pub fn sleep(&mut self) {
+        //
+        // -- configure WAKEUP pin 2
+        self.pwr.csr.modify(|_, w| w.ewup2().set_bit());
+
+        // -- enter STANDBY mode (RM0360 p.83)
+        // set SLEEPDEEP in cortex-m0 system control register
+        self.scb.set_sleepdeep();
+        // set PDDS bit in PWR Control Register
+        self.pwr.cr.modify(|_, w| w.pdds().set_bit());
+        // clear WUF bit in PWR Control/Status Register
+        self.pwr.cr.modify(|_, w| w.cwuf().set_bit());
+        // (CWUF is cleared after two system clock cycles)
+        cortex_m::asm::delay(100);
+
+        cortex_m::asm::wfe();
     }
 
     /// Return true if RTC is write protected, false otherwise
@@ -57,7 +78,7 @@ impl RealTimeClock {
         //ahbrstr.write(|w| w.iopcrst().set_bit());
         //ahbrstr.write(|w| w.iopcrst().clear_bit());
 
-        // -- start configuration by unlocking the registers
+        // -- start RTC configuration by unlocking the registers
         self.unlock();
 
         let bdcr = unsafe { &(*RCC::ptr()).bdcr };
@@ -82,6 +103,12 @@ impl RealTimeClock {
                 .lse()
         });
 
+        // -- prepare RTC initialization
+        // set INIT bit
+        self.rtc.isr.modify(|_, w| w.init().set_bit());
+        // wait for INITF bit to set
+        while self.rtc.isr.read().initf().bit_is_clear() {}
+
         // prescaler register
         // LSE clock at 32 768 Hz
         // based on AN4759
@@ -89,39 +116,38 @@ impl RealTimeClock {
             .prer
             .modify(|_, w| unsafe { w.prediv_a().bits(127).prediv_s().bits(255) });
 
-        self.rtc.isr.modify(|_, w| w.init().clear_bit());
-
-        // -- prepare RTC initialization
-        // set INIT bit
-        //self.rtc.isr.modify(|_, w| w.init().set_bit());
-        // wait for INITF bit to set
-        //while self.rtc.isr.read().initf().bit_is_clear() {}
-
-        // configuration register
-        /*       self.rtc.cr.modify(|_, w| {
-            w
-                // hour format: 24h
-                .fmt()
-                .clear_bit()
+        // configuration date and time
+        self.rtc.tr.write(|w| {
+            unsafe {
+                w
+                    // hour format: 24h
+                    .pm()
+                    .clear_bit()
+                    //
+                    .ht()
+                    .bits(2)
+                    .hu()
+                    .bits(3)
+                    .mnt()
+                    .bits(4)
+                    .mnt()
+                    .bits(2)
+            }
         });
-
-        // prescaler register
-        // LSE clock at 32 768 Hz
-        self.rtc.prer.modify(|_, w| unsafe { w.prediv_a().bits(1) });
 
         // -- exit initialization mode
         // clear INIT bit
         self.rtc.isr.modify(|_, w| w.init().clear_bit());
         // lock RTC registers
-        self.lock();*/
+        self.lock();
     }
 
     pub fn get(&self) -> (u8, u8) {
-        let sect = self.rtc.tr.read().st().bits();
-        let secu = self.rtc.tr.read().su().bits();
+        let hourt = self.rtc.tr.read().ht().bits();
+        let houru = self.rtc.tr.read().hu().bits();
         let mint = self.rtc.tr.read().mnt().bits();
         let minu = self.rtc.tr.read().mnu().bits();
 
-        ((10 * mint + minu), (10 * sect + secu))
+        ((10 * hourt + houru), (10 * mint + minu))
     }
 }

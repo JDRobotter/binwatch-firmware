@@ -129,7 +129,7 @@ impl WatchDisplay {
     pub fn update(&mut self) {
         self.time = u16::wrapping_add(self.time, 1);
 
-        let (wa, wb) = if self.time % 100 == 0 {
+        let (wa, wb) = if self.time % 20 == 0 {
             (0xffff, 0xffff)
         } else {
             self.display
