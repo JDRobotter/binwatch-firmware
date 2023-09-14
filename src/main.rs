@@ -1,6 +1,9 @@
 #![no_main]
 #![no_std]
 
+mod display;
+use display::WatchDisplay;
+
 mod rtc;
 use rtc::RealTimeClock;
 
@@ -46,44 +49,23 @@ fn main() -> ! {
     // configure clock frequency
     let mut rcc = p.RCC.configure().sysclk(1.mhz()).freeze(&mut p.FLASH);
 
-    let gpioa = p.GPIOA.split(&mut rcc);
-    let gpiob = p.GPIOB.split(&mut rcc);
-    let gpioc = p.GPIOC.split(&mut rcc);
+    //let gpioa = p.GPIOA.split(&mut rcc);
+    //let mut dbg = cortex_m::interrupt::free(|cs| gpioa.pa7.into_push_pull_output(cs));
 
-    // setup leds GPIOs
-    let (
-        mut button,
-        mut hour0,
-        mut hour1,
-        mut hour2,
-        mut hour3,
-        mut hour4,
-        mut min0,
-        mut min1,
-        mut min2,
-        mut min3,
-        mut min4,
-        mut min5,
-    ) = cortex_m::interrupt::free(move |cs| {
-        (
-            gpioc.pc13.into_pull_down_input(cs),
-            gpiob.pb14.into_push_pull_output(cs), // H0
-            gpioa.pa7.into_push_pull_output(cs),  // H1
-            gpioa.pa5.into_push_pull_output(cs),  // H2
-            gpioa.pa2.into_push_pull_output(cs),  // H3
-            gpioa.pa0.into_push_pull_output(cs),  // H4
-            gpiob.pb13.into_push_pull_output(cs), // M0
-            gpiob.pb12.into_push_pull_output(cs), // M1
-            gpioa.pa6.into_push_pull_output(cs),  // M2
-            gpioa.pa4.into_push_pull_output(cs),  // M3
-            gpioa.pa3.into_push_pull_output(cs),  // M4
-            gpioa.pa1.into_push_pull_output(cs),  // M5
-        )
-    });
+    //let gpiob = p.GPIOB.split(&mut rcc);
+    let gpioc = p.GPIOC.split(&mut rcc);
 
     // setup RTC
     cortex_m::asm::delay(100_000);
     let rtc = RealTimeClock::new(p.PWR, p.RTC);
+    // setup display
+    let mut display = WatchDisplay::new(p.GPIOA, p.GPIOB);
+
+    //// XXX
+    display.set_time(0xff, 0xff);
+    cortex_m::asm::delay(100000);
+    display.set_time(0, 0);
+    // XXX
 
     handler!(tim3_handler = || {});
 
@@ -95,40 +77,16 @@ fn main() -> ! {
             cortex_m::peripheral::NVIC::unmask(pac::Interrupt::TIM3);
         }
 
+        let mut k = 0u32;
         loop {
-            let (mins, secs) = rtc.get();
+            k += 1;
 
-            if secs & 1 != 0 {
-                min0.set_high().ok();
-            } else {
-                min0.set_low().ok();
+            if k % 10000 == 0 {
+                let (mins, secs) = rtc.get();
+                display.set_time(mins, secs);
             }
-            if secs & 2 != 0 {
-                min1.set_high().ok();
-            } else {
-                min1.set_low().ok();
-            }
-            if secs & 4 != 0 {
-                min2.set_high().ok();
-            } else {
-                min2.set_low().ok();
-            }
-            if secs & 8 != 0 {
-                min3.set_high().ok();
-            } else {
-                min3.set_low().ok();
-            }
-            if secs & 16 != 0 {
-                min4.set_high().ok();
-            } else {
-                min4.set_low().ok();
-            }
-            if secs & 32 != 0 {
-                min5.set_high().ok();
-            } else {
-                min5.set_low().ok();
-            }
-            cortex_m::asm::delay(100_000);
+
+            display.update();
         }
     });
 

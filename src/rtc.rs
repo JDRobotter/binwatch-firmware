@@ -18,15 +18,20 @@ impl RealTimeClock {
     /// Return true if RTC is write protected, false otherwise
     #[inline]
     fn is_write_protected(&self) -> bool {
-        self.pwr.cr.read().dbp().bit()
+        // RM0360 p85:
+        // DBP: Disable RTC domain write protection
+        // 0: Access to RTC disabled
+        // 1: Access to RTC enabled
+        self.pwr.cr.read().dbp().bit_is_clear()
     }
 
     /// Unlock RTC registers write protection
     fn unlock(&mut self) {
-        // disable RTC domain write protection
-        if self.pwr.cr.read().dbp().bit_is_set() {
-            self.pwr.cr.modify(|_, w| w.dbp().set_bit());
-            while self.pwr.cr.read().dbp().bit_is_clear() {}
+        // check DBP bit
+        if self.is_write_protected() {
+            // bit must be set to enable write access
+            self.pwr.cr.write(|w| w.dbp().set_bit());
+            while self.is_write_protected() {}
         }
     }
 
@@ -37,18 +42,23 @@ impl RealTimeClock {
 
     fn configure(&mut self) {
         // after domain reset RTC registers are write-protected
-        // -- start configuration by unlocking the registers
-        self.unlock();
 
-        // -- stup
+        // -- setup
+        // enable PWR module
+        let apb1enr = unsafe { &(*RCC::ptr()).apb1enr };
+        apb1enr.modify(|_, w| w.pwren().enabled());
+        //let ahbenr = unsafe { &(*RCC::ptr()).ahbenr };
+        //ahbenr.modify(|_, w| w.iopcen().enabled());
         // reset PWR module
         let apb1rstr = unsafe { &(*RCC::ptr()).apb1rstr };
         apb1rstr.write(|w| w.pwrrst().set_bit());
         apb1rstr.write(|w| w.pwrrst().clear_bit());
+        //let ahbrstr = unsafe { &(*RCC::ptr()).ahbrstr };
+        //ahbrstr.write(|w| w.iopcrst().set_bit());
+        //ahbrstr.write(|w| w.iopcrst().clear_bit());
 
-        // enable PWR module
-        let apb1enr = unsafe { &(*RCC::ptr()).apb1enr };
-        apb1enr.modify(|_, w| w.pwren().enabled());
+        // -- start configuration by unlocking the registers
+        self.unlock();
 
         let bdcr = unsafe { &(*RCC::ptr()).bdcr };
         // -- configure and start LSE oscillator
